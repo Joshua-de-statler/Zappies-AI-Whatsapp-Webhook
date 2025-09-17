@@ -15,18 +15,34 @@ ACCESS_TOKEN = os.environ.get("WHATSAPP_TOKEN")
 VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN")
 CHATBOT_API_URL = os.environ.get("CHATBOT_API_URL", "http://localhost:8000/chat")
 PHONE_NUMBER_ID = os.environ.get("PHONE_NUMBER_ID")
+API_SECRET_KEY = os.environ.get("API_SECRET_KEY") # <-- Read the new secret key
 
 # --- Helper Functions ---
 def get_chatbot_reply(message: str, session_id: str) -> str:
     """Calls your FastAPI chatbot endpoint."""
-    headers = {"Content-Type": "application/json"}
+    if not API_SECRET_KEY:
+        print("Error: API_SECRET_KEY is not set in the environment.")
+        return "Error: The chatbot is not configured correctly (missing API key)."
+
+    # Add the secret key to the headers
+    headers = {
+        "Content-Type": "application/json",
+        "x-api-key": API_SECRET_KEY
+    }
     payload = {"query": message, "conversation_id": session_id}
     
     try:
-        response = requests.post(CHATBOT_API_URL, headers=headers, json=payload, timeout=10) # Added timeout
-        response.raise_for_status()
+        response = requests.post(CHATBOT_API_URL, headers=headers, json=payload, timeout=30)
+        response.raise_for_status() # This will raise an error for 4xx or 5xx status codes
         response_data = response.json()
         return response_data.get("response", "Sorry, I couldn't process that.")
+    except requests.exceptions.HTTPError as http_err:
+        if http_err.response.status_code == 401:
+            print("Error: 401 Unauthorized. The API_SECRET_KEY is incorrect.")
+            return "Sorry, I'm having trouble authenticating with my brain right now."
+        else:
+            print(f"HTTP error occurred: {http_err}")
+            return "Sorry, a server error occurred."
     except requests.exceptions.RequestException as e:
         print(f"Error calling chatbot API: {e}")
         return "Sorry, I'm having trouble connecting to my brain right now."
@@ -42,7 +58,7 @@ def send_whatsapp_message(to_number: str, message: str):
     data = {"messaging_product": "whatsapp", "to": to_number, "type": "text", "text": {"body": message}}
     
     try:
-        response = requests.post(url, headers=headers, json=data, timeout=10) # Added timeout
+        response = requests.post(url, headers=headers, json=data, timeout=30)
         if response.status_code == 200:
             print(f"Successfully sent message to {to_number}")
         else:
@@ -50,11 +66,8 @@ def send_whatsapp_message(to_number: str, message: str):
     except requests.exceptions.RequestException as e:
         print(f"Error sending WhatsApp message: {e}")
 
-# NEW: Function to process messages in the background
+# (The rest of the webhook.py file remains unchanged)
 def process_whatsapp_message(data):
-    """
-    This function handles the core logic in a separate thread.
-    """
     try:
         for entry in data.get("entry", []):
             for change in entry.get("changes", []):
@@ -63,9 +76,7 @@ def process_whatsapp_message(data):
                     message_data = value["messages"][0]
                     from_number = message_data["from"]
                     
-                    # NEW: Add a check to prevent the bot from replying to itself.
-                    # This compares the sender's number with the bot's number ID.
-                    if message_data.get('from_me'): # Another way to check if message is from the bot
+                    if message_data.get('from_me'):
                         print(f"Ignoring outgoing message to {from_number}")
                         continue
                         
@@ -73,7 +84,6 @@ def process_whatsapp_message(data):
                         message_text = message_data["text"]["body"]
                         print(f"Processing message: '{message_text}' from {from_number}")
                         
-                        # Get reply from chatbot and send it
                         chatbot_response = get_chatbot_reply(message_text, from_number)
                         send_whatsapp_message(from_number, chatbot_response)
                     else:
@@ -84,7 +94,6 @@ def process_whatsapp_message(data):
         print(f"Error parsing message data in thread: {e}")
 
 
-# --- Webhook Endpoint ---
 @app.route("/webhook", methods=["GET", "POST"])
 def webhook():
     if request.method == "GET":
@@ -98,14 +107,10 @@ def webhook():
         data = request.get_json()
         
         if data and data.get("object") == "whatsapp_business_account":
-            # MODIFIED: Start a thread to process the message and respond immediately
             thread = threading.Thread(target=process_whatsapp_message, args=(data,))
             thread.start()
         
-        # Respond to Meta immediately to prevent retries
         return "OK", 200
 
-# --- Run the Application ---
 if __name__ == "__main__":
     app.run(port=5001, debug=True)
-

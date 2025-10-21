@@ -7,3 +7,4 @@ pydantic
 flask
 requests
 python-dotenv
+gunicorn

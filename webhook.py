@@ -32,7 +32,7 @@ def get_chatbot_reply(message: str, session_id: str) -> str:
     payload = {"query": message, "conversation_id": session_id}
     
     try:
-        response = requests.post(CHATBOT_API_URL, headers=headers, json=payload, timeout=60)
+        response = requests.post(CHATBOT_API_URL, headers=headers, json=payload, timeout=120)
         response.raise_for_status() # This will raise an error for 4xx or 5xx status codes
         response_data = response.json()
         return response_data.get("response", "Sorry, I couldn't process that.")
@@ -58,7 +58,7 @@ def send_whatsapp_message(to_number: str, message: str):
     data = {"messaging_product": "whatsapp", "to": to_number, "type": "text", "text": {"body": message}}
     
     try:
-        response = requests.post(url, headers=headers, json=data, timeout=60)
+        response = requests.post(url, headers=headers, json=data, timeout=120)
         if response.status_code == 200:
             print(f"Successfully sent message to {to_number}")
         else:
